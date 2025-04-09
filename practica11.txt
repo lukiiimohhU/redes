@@ -1,0 +1,35 @@
+1.- Configurar el netplan para tener conectividad
+
+2.- Instalar SSH en cliente y servidor:
+	- sudo apt install openssh-client
+	- sudo apt install openssh-server
+
+3.- Modificar el PasswordAuthentication
+	- Servidor: /etc/ssh/sshd_config
+	- Cliente: /etc/ssh/ssh_config
+
+4.- La directiva es PasswordAuthentication
+
+5.- Permitir el cortafuegos con "sudo ufw allow ssh" en el servidor
+
+6.- Para conectarse "ssh usuario@ipservidor"
+
+7.- Generar claves publicas CLIENTE con "ssh-keygen -t rsa -b 1024"
+
+8.- Copiar las claves al servidor: "scp ~/.ssh/id_rsa.pub usuario@10.0.1.1:/home/usuario/.ssh/
+
+9.- Movemos las claves a las authorized (en el servidor): cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
+
+10.- Damos permisos: chmod 644 authorized_keys y 755 a .ssh
+
+11.- Ahora nos podemos conectar sin poner la clave de usuario
+
+12.- (OPCIONAL) Para que los permisos cuando nos autentifiquemos con la clave son correctos el comando es: chown usuario:grupo ~/.ssh -R
+
+13.- Cambiar configuración: 
+	- PermitRootLogin no (NO Root)
+	- LoginGraceTime 30s (Tiempo máximo de contraseña)
+	- MaxAuthTries 3 (Máximos intentos)
+	- MaxSessions 2 (Máximas sesiones paralelas)
+
+14.- sudo systemctl restart ssh
