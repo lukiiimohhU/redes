@@ -1,0 +1,124 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <cstring>
+#include <string>
+#include <stdexcept>
+#include <sys/socket.h> 
+#include <netinet/ip.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+
+using namespace std;
+
+#define ERROR(funcion) throw runtime_error(funcion + string(strerror(errno)))
+
+int configura_servidor(const char *puerto) {
+    struct addrinfo conf = {
+        .ai_flags = AI_PASSIVE,         // Indica que es para aceptar conexiones entrantes
+        .ai_family = AF_UNSPEC,         // Acepta tanto IPv4 como IPv6
+        .ai_socktype = SOCK_STREAM      // Usamos protocolo TCP (stream)
+    }, *res;
+
+    // Llamamos a getaddrinfo para obtener las posibles direcciones IP a usar
+    if(getaddrinfo(NULL, puerto, &conf, &res)) ERROR("getaddrinfo() - ");
+
+    int unsocket = -1;
+    // Creamos el socket usando los datos de getaddrinfo
+    while((unsocket = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) != -1) {
+        break;  // Si el socket se crea correctamente, salimos del bucle
+    }
+
+    // Permitimos reutilizar el puerto rápidamente (evita errores al reiniciar el servidor)
+    int r = 1;
+    setsockopt(unsocket, SOL_SOCKET, SO_REUSEADDR, &r, sizeof(r));
+
+    // Asociamos el socket al puerto
+    if(bind(unsocket, res->ai_addr, res->ai_addrlen)) ERROR("bind() - ");
+
+    // Indicamos que el socket escuche conexiones entrantes (máximo 10 en cola)
+    if(listen(unsocket, 10)) ERROR("listen() - ");
+
+    return unsocket;  // Devolvemos el socket ya preparado
+}
+
+void notifica_cliente(struct sockaddr_storage *direccion) {
+    char strdireccion[NI_MAXHOST + 1];
+
+    // Convertimos la dirección IP a string dependiendo si es IPv4 o IPv6
+    inet_ntop(direccion->ss_family,
+        direccion->ss_family == AF_INET ?
+        (void *)&((struct sockaddr_in *) direccion)->sin_addr :
+        (void *)&((struct sockaddr_in6 *) direccion)->sin6_addr,
+        strdireccion, NI_MAXHOST);
+
+    cout << "Conexión desde " << strdireccion << endl;
+}
+
+string extrae_peticion(int socketcliente) {
+    char buffer[1024];  // Buffer para almacenar la cabecera HTTP
+    recv(socketcliente, buffer, sizeof(buffer) - 1, 0);  // Leemos la petición del cliente
+    buffer[1023] = '\0'; // Aseguramos que termine con '\0'
+
+    string peticion(buffer);           // Convertimos el buffer a string
+    istringstream ss(peticion);        // Creamos un stream para separar palabras
+    string metodo, ruta, version;
+
+    ss >> metodo >> ruta >> version;   // Extraemos: método (GET), ruta (/algo.html), y versión
+
+    cout << "Se solicita el archivo " << ruta << endl;
+
+    // Si no se especifica archivo, se devuelve index.html por defecto
+    return ruta == "/" ? "/index.html" : ruta;
+}
+
+string carga_archivo(string nombre) {
+    ifstream archivo("." + nombre);  // Abrimos el archivo en el directorio actual
+
+    // Si no se puede abrir, devolvemos mensaje de error
+    if (!archivo.is_open()) return "<h1>Error 404: Archivo no encontrado</h1>";
+
+    stringstream contenido;
+    contenido << archivo.rdbuf();  // Leemos todo el contenido del archivo
+    return contenido.str();        // Devolvemos el contenido como string
+}
+
+void envia_respuesta(int socketcliente, string contenido) {
+    // Formamos la respuesta HTTP completa con cabecera + contenido
+    string respuesta =
+        "HTTP/1.1 200 OK\r\nContent-Length: " +
+        to_string(contenido.length()) +              // Longitud del contenido
+        "\r\nContent-Type: text/html\r\n\r\n" +      // Tipo MIME
+        contenido + "\r\n";                          // Contenido del archivo
+
+    // Enviamos toda la respuesta al cliente
+    send(socketcliente, respuesta.c_str(), respuesta.length(), 0);
+
+    // Cerramos la conexión con el cliente
+    close(socketcliente);
+}
+
+int main(int argc, char *argv[]) {
+    const auto PUERTO_HTTP = "8080"; // Puerto en el que escucha el servidor (8080 por permisos)
+    struct sockaddr_storage dircliente;   // Para almacenar dirección del cliente
+    socklen_t longdircliente;             // Longitud de la dirección
+    int misocket = configura_servidor(PUERTO_HTTP);  // Configuramos el servidor y obtenemos socket
+
+    while(true) {  // Bucle infinito para aceptar múltiples conexiones
+        longdircliente = sizeof dircliente;
+
+        // Aceptamos conexión entrante
+        int socketcliente = accept(misocket, (struct sockaddr *)&dircliente, &longdircliente);
+
+        if(socketcliente != -1) {
+            notifica_cliente(&dircliente);                   // Mostramos IP del cliente
+            string peticion = extrae_peticion(socketcliente); // Leemos qué archivo quiere
+            string contenido = carga_archivo(peticion);       // Leemos contenido del archivo
+            envia_respuesta(socketcliente, contenido);        // Enviamos respuesta
+        }
+    }
+
+    close(misocket);  // Aunque nunca llega aquí, se cierra el socket del servidor
+    return 0;
+}
