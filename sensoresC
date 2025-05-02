@@ -1,0 +1,66 @@
+#include <iostream>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <unistd.h>
+
+using namespace std;
+
+#define ERROR(msg) throw runtime_error(string(msg) + ": " + strerror(errno))
+
+int main(int argc, char *argv[]) {
+    // Verifica que se ha pasado 1 argumento al programa (nombre del sensor)
+    if (argc != 2) {
+        cerr << "Uso: " << argv[0] << " <nombre_sensor>" << endl;
+        return 1;
+    }
+
+    // Guardamos el nombre del sensor en una variable
+    const char *sensor = argv[1];
+
+    // Preparamos una estructura "hints" que sirve como filtro para getaddrinfo
+    struct addrinfo hints = {}, *res;
+    hints.ai_family = AF_INET;        // Queremos usar IPv4
+    hints.ai_socktype = SOCK_STREAM;  // Tipo de socket TCP (conexión)
+
+    // Llamamos a getaddrinfo para obtener la IP, puerto y demás parámetros del servidor
+    int err = getaddrinfo("localhost", "8080", &hints, &res); // Usamos localhost y puerto 8080
+    if (err != 0)
+        ERROR(gai_strerror(err));  // Si hay error, lanza una excepción con el mensaje
+
+    // Creamos un socket usando la información obtenida
+    int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (sock == -1)
+        ERROR("socket");  // Error al crear el socket
+
+    // Conectamos el socket al servidor usando su dirección y longitud
+    if (connect(sock, res->ai_addr, res->ai_addrlen) == -1)
+        ERROR("connect");  // Error al conectar (servidor caído, DNS mal, etc.)
+
+    // Enviamos el nombre del sensor al servidor
+    string peticion = string(sensor) + "\n"; // Agregamos \n para delimitar
+    if (send(sock, peticion.c_str(), peticion.size(), 0) == -1)
+        ERROR("send");  // Error al enviar la petición
+
+    // Preparamos un buffer para leer la respuesta del servidor
+    char buffer[1024];
+    ssize_t bytes;
+
+    // Bucle para recibir datos del servidor
+    while ((bytes = recv(sock, buffer, sizeof(buffer) - 1, 0)) > 0) {
+        buffer[bytes] = '\0';  // Aseguramos que el string termina con null
+        cout << "Valor del sensor: " << buffer; // Imprimimos la respuesta
+    }
+
+    // Si recv devuelve -1, hubo un error al leer
+    if (bytes == -1)
+        ERROR("recv");
+
+    // Cerramos el socket y liberamos la memoria de las direcciones
+    close(sock);         // Cerramos la conexión TCP con el servidor
+    freeaddrinfo(res);   // Liberamos la estructura res creada por getaddrinfo
+
+    return 0; // Fin del programa
+}
