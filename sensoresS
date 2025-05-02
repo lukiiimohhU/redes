@@ -1,0 +1,109 @@
+#include <iostream>
+#include <string>
+#include <stdexcept>
+#include <sys/socket.h> 
+#include <netinet/ip.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <cerrno>     // For errno
+#include <cstring>    // For std::strerror
+
+using namespace std;
+
+#define ERROR(funcion) throw runtime_error(funcion + string(std::strerror(errno)))
+
+int configura_servidor(const char *puerto) {
+    struct addrinfo conf = {
+        .ai_flags = AI_PASSIVE,         // Indica que es para aceptar conexiones entrantes
+        .ai_family = AF_UNSPEC,         // Acepta tanto IPv4 como IPv6
+        .ai_socktype = SOCK_STREAM      // Usamos protocolo TCP (stream)
+    }, *res;
+
+    // Llamamos a getaddrinfo para obtener las posibles direcciones IP a usar
+    if(getaddrinfo(NULL, puerto, &conf, &res)) ERROR("getaddrinfo() - ");
+
+    int unsocket = -1;
+    // Creamos el socket usando los datos de getaddrinfo
+    while((unsocket = socket(res->ai_family, res->ai_socktype, res->ai_protocol)) != -1) {
+        break;  // Si el socket se crea correctamente, salimos del bucle
+    }
+
+    // Permitimos reutilizar el puerto rápidamente (evita errores al reiniciar el servidor)
+    int r = 1;
+    setsockopt(unsocket, SOL_SOCKET, SO_REUSEADDR, &r, sizeof(r));
+
+    // Asociamos el socket al puerto
+    if(bind(unsocket, res->ai_addr, res->ai_addrlen)) ERROR("bind() - ");
+
+    // Indicamos que el socket escuche conexiones entrantes (máximo 10 en cola)
+    if(listen(unsocket, 10)) ERROR("listen() - ");
+
+    return unsocket;  // Devolvemos el socket ya preparado
+}
+
+void notifica_cliente(struct sockaddr_storage *direccion) {
+    char strdireccion[NI_MAXHOST + 1];
+
+    // Convertimos la dirección IP a string dependiendo si es IPv4 o IPv6
+    inet_ntop(direccion->ss_family,
+        direccion->ss_family == AF_INET ?
+        (void *)&((struct sockaddr_in *) direccion)->sin_addr :
+        (void *)&((struct sockaddr_in6 *) direccion)->sin6_addr,
+        strdireccion, NI_MAXHOST);
+
+    cout << "Conexión desde " << strdireccion << endl;
+}
+
+string extrae_peticion(int socketcliente) {
+    char buffer[1024];  // Buffer para almacenar el nombre del sensor
+    ssize_t bytes = recv(socketcliente, buffer, sizeof(buffer) - 1, 0);  // Leemos la petición del cliente
+    if (bytes <= 0) return "";
+    buffer[bytes] = '\0'; // Aseguramos que termine con '\0'
+
+    string sensor(buffer);
+    // Eliminamos posibles \n o \r del final
+    sensor.erase(sensor.find_last_not_of("\r\n") + 1);
+    cout << "Se solicita el sensor: " << sensor << endl;
+
+    return sensor;
+}
+
+string obtiene_valor_sensor(string nombre) {
+    // Simulamos valores para diferentes sensores
+    if (nombre == "temperature") return "25.5";
+    if (nombre == "humidity") return "60";
+    if (nombre == "pressure") return "1013";
+    return "Sensor desconocido";
+}
+
+void envia_respuesta(int socketcliente, string contenido) {
+    // Enviamos el valor del sensor al cliente
+    string respuesta = contenido + "\n"; // Agregamos \n para delimitar
+    send(socketcliente, respuesta.c_str(), respuesta.length(), 0);
+    close(socketcliente);
+}
+
+int main(int argc, char *argv[]) {
+    const auto PUERTO_SENSOR = "8080"; // Puerto en el que escucha el servidor
+    struct sockaddr_storage dircliente;   // Para almacenar dirección del cliente
+    socklen_t longdircliente;             // Longitud de la dirección
+    int misocket = configura_servidor(PUERTO_SENSOR);  // Configuramos el servidor
+
+    while(true) {  // Bucle infinito para aceptar múltiples conexiones
+        longdircliente = sizeof dircliente;
+
+        // Aceptamos conexión entrante
+        int socketcliente = accept(misocket, (struct sockaddr *)&dircliente, &longdircliente);
+
+        if(socketcliente != -1) {
+            notifica_cliente(&dircliente);                   // Mostramos IP del cliente
+            string peticion = extrae_peticion(socketcliente); // Leemos qué sensor quiere
+            string contenido = obtiene_valor_sensor(peticion); // Obtenemos valor del sensor
+            envia_respuesta(socketcliente, contenido);        // Enviamos respuesta
+        }
+    }
+
+    close(misocket);  // Aunque nunca llega aquí, se cierra el socket del servidor
+    return 0;
+}
