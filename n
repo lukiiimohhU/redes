@@ -1,0 +1,24 @@
+1.- Instalar NGINX: sudo apt install nginx
+
+2.- Configurar DNS Cliente: sudo nano /etc/hosts y añadir linea <IP_SERVIDOR> URL(www.ejemplo.com)
+
+3.- Archivo de configuración NGINX: /etc/nginx/nginx.conf
+
+4.- Para crear un sitio en la carpeta "sites-available" y creas un archivo con el nombre de URL que quieras, el que hay que poner arriba.
+
+5.- Para configurar el servidor: 
+server { 
+   listen PUERTO;
+   server_name URL;
+
+   root /var/www/html; (Ruta desde donde sirve los archivos que se ven en el navegador)
+   index index.html; (Archivo en la ruta de arriba que se ve)
+
+   location /ujaen {
+       return 301 URL; (301 es redireccion permanente a una URL)
+   }
+
+   location /pub {
+      root /var/www; (Para servir un archivo local)
+   }
+}
